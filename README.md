@@ -8,10 +8,10 @@ A full-stack OTA web app: search and book flights, hotels, and curated tour pack
 
 ## Live demo
 
-<!-- Fill in after deploying — see "Deploying to Vercel" below. -->
-- **URL:** _not yet deployed_
-- **Customer login:** `customer@ota-demo.test` / `Traveler123!`
+- **URL:** https://wayfare-gg7y.vercel.app
+- **Customer login:** `customer@ota-demo.test` / `Traveler123!` (or register your own — no real email is required)
 - **Admin login:** `admin@ota-demo.test` / `Admin123!`
+- Checkout runs real Stripe Checkout in test mode — use card `4242 4242 4242 4242`, any future expiry, any CVC.
 
 ---
 
