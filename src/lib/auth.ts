@@ -11,6 +11,10 @@ import { prisma } from "@/lib/db";
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
+  // Required when self-hosting behind a platform that terminates TLS/proxies
+  // the Host header (Vercel, Netlify, Docker, a custom PORT locally, etc.) —
+  // otherwise Auth.js rejects requests as an untrusted host in production.
+  trustHost: true,
   providers: [
     Credentials({
       name: "Credentials",
