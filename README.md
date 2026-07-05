@@ -65,7 +65,7 @@ All variables live in `.env` (see `.env.example` for the template — no secrets
 |---|---|
 | `DATABASE_URL` | Postgres connection string (Neon "Pooled connection" recommended). Required. |
 | `AUTH_SECRET` | Session signing secret for Auth.js. Required. |
-| `APP_URL` | Base URL used for Stripe redirect URLs and email links. Falls back to Vercel's own `VERCEL_URL`, then `localhost:3000`, if unset. |
+| `APP_URL` | Base URL used for Stripe redirect URLs and email links. Strongly recommended to set explicitly on Vercel — see the callout below. |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe **test-mode** keys. Optional — see "Payments." |
 | `FLIGHT_PROVIDER` / `HOTEL_PROVIDER` / `TOUR_PROVIDER` | Booking-adapter selection, currently `mock` only. |
 | `EMAIL_PROVIDER` / `EMAIL_FROM` | Transactional email adapter, currently `mock` only. |
@@ -261,7 +261,7 @@ In the Vercel project's **Settings → Environment Variables** (or the import sc
 |---|---|---|
 | `DATABASE_URL` | Your Neon pooled connection string | Postgres connection |
 | `AUTH_SECRET` | Output of `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | Signs Auth.js session cookies |
-| `APP_URL` | Your Vercel URL, e.g. `https://your-project.vercel.app` | Used to build Stripe redirect URLs and email links. You won't know the exact URL until after the first deploy — deploy once, then come back and set this, then redeploy (or rely on the automatic `VERCEL_URL` fallback and skip this entirely) |
+| `APP_URL` | Your **stable** Vercel URL, e.g. `https://your-project.vercel.app` (from Settings → Domains — not a deployment-specific hash URL) | Used to build Stripe redirect URLs and email links. You won't know the exact URL until after the first deploy — deploy once, then come back and set this, then redeploy |
 | `STRIPE_SECRET_KEY` | `sk_test_...` from your Stripe dashboard | Server-side Stripe API calls (see "Add Stripe test keys" below) |
 | `STRIPE_PUBLISHABLE_KEY` | `pk_test_...` from your Stripe dashboard | Client-side Stripe.js (reserved for future use; Checkout redirect doesn't require it today) |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` from your Stripe webhook endpoint | Verifies webhook requests are really from Stripe (see below) |
@@ -272,6 +272,8 @@ In the Vercel project's **Settings → Environment Variables** (or the import sc
 | `EMAIL_FROM` | `bookings@ota-demo.test` | Cosmetic "from" address in logged emails |
 
 Leave `STRIPE_*` blank if you just want the mock-payment fallback live — the app works fully either way (see "Payments").
+
+> **Deployment Protection + `APP_URL` gotcha:** if your Vercel project has Deployment Protection set to "Standard Protection" (common on Team accounts), the stable production alias (`your-project.vercel.app`, from Settings → Domains) is public, but each specific *deployment's* own hash-suffixed URL (`your-project-<hash>-<team>.vercel.app`) stays behind a Vercel login wall even in production. `getAppUrl()` (`src/lib/url.ts`) falls back to Vercel's `VERCEL_PROJECT_PRODUCTION_URL` (the stable alias) if `APP_URL` isn't set, specifically to avoid Stripe's checkout redirect ever sending a paying customer to that login wall — but setting `APP_URL` explicitly to your stable alias is still the most reliable option and is what's recommended above.
 
 ### 5. Run migrations + seed against the production database
 
