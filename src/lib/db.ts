@@ -1,7 +1,16 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 
-if (!process.env.DATABASE_URL) {
+// Next.js evaluates this module's top level even for routes it ultimately
+// renders dynamically (e.g. its speculative static-optimization attempt for
+// /_not-found, which every route's layout chain runs through) — so this
+// check must not fire during `next build` itself, only at actual runtime,
+// or it takes the whole build down whenever DATABASE_URL isn't available in
+// the build environment. getFxRates() already has its own try/catch for the
+// same reason; this just gives an earlier, clearer error at real request
+// time instead of a cryptic connection-refused error deep in `pg`.
+if (!process.env.DATABASE_URL && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
   throw new Error(
     "DATABASE_URL is not set. Copy .env.example to .env (locally) or set it in your host's environment variables (see README \"Deploying to Vercel\")."
   );
