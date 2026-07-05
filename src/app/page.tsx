@@ -25,7 +25,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
+      <section className="relative z-10 mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
         <div className="-mt-16 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <TrustCard icon={<ShieldCheck className="h-5 w-5" />} title="Secure checkout" text="Stripe test-mode payments, PCI-compliant by design." />
           <TrustCard icon={<BadgePercent className="h-5 w-5" />} title="Transparent pricing" text="No hidden fees — the price you see is the price you pay." />
