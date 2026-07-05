@@ -1,6 +1,12 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL is not set. Copy .env.example to .env (locally) or set it in your host's environment variables (see README \"Deploying to Vercel\")."
+  );
+}
+
 // Swapping to a different SQL database later: change `provider` in
 // prisma/schema.prisma and swap this adapter (e.g. @prisma/adapter-mysql2).
 // No other app code changes — everything else talks to `prisma`, never to

@@ -1,6 +1,12 @@
+import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set. Copy .env.example to .env and fill it in before seeding.");
+}
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -92,8 +98,34 @@ async function seedFlights() {
 
   const today = new Date();
   const horizonDays = 45;
-  let flightCount = 0;
-  let fareCount = 0;
+  // Built up in memory and inserted via a handful of batched createMany
+  // calls (chunked below) instead of one create() per flight — with ~1,440
+  // rows this keeps seeding to a few round trips instead of ~1,440 of them,
+  // which matters once DATABASE_URL points at a real network-hop database
+  // instead of local SQLite.
+  const flightRows: {
+    id: string;
+    flightNumber: string;
+    airline: string;
+    airlineCode: string;
+    originCode: string;
+    originCity: string;
+    destinationCode: string;
+    destinationCity: string;
+    departAt: Date;
+    arriveAt: Date;
+    durationMinutes: number;
+    stops: number;
+    aircraft: string;
+  }[] = [];
+  const fareRows: {
+    flightId: string;
+    cabin: string;
+    priceUsdCents: number;
+    seatsAvailable: number;
+    baggageAllowance: string;
+    refundable: boolean;
+  }[] = [];
 
   for (const route of ROUTES) {
     for (let dayOffset = 1; dayOffset <= horizonDays; dayOffset++) {
@@ -109,28 +141,27 @@ async function seedFlights() {
         const flightNumber = `${airline.code}${100 + ((dayOffset * 7 + slot.hour) % 900)}`;
         const priceJitter = 1 + (((dayOffset * 13) % 10) - 5) / 100; // +/-5% so prices aren't identical every day
 
-        const flight = await prisma.flight.create({
-          data: {
-            flightNumber,
-            airline: airline.name,
-            airlineCode: airline.code,
-            originCode: route.o,
-            originCity: route.oc,
-            destinationCode: route.d,
-            destinationCity: route.dc,
-            departAt,
-            arriveAt,
-            durationMinutes: route.durationMinutes,
-            stops: 0,
-            aircraft: route.aircraft,
-          },
+        const flightId = randomUUID();
+        flightRows.push({
+          id: flightId,
+          flightNumber,
+          airline: airline.name,
+          airlineCode: airline.code,
+          originCode: route.o,
+          originCity: route.oc,
+          destinationCode: route.d,
+          destinationCity: route.dc,
+          departAt,
+          arriveAt,
+          durationMinutes: route.durationMinutes,
+          stops: 0,
+          aircraft: route.aircraft,
         });
-        flightCount++;
 
         const economyPrice = Math.round(route.economyBaseCents * priceJitter);
-        const fares = [
+        fareRows.push(
           {
-            flightId: flight.id,
+            flightId,
             cabin: "economy",
             priceUsdCents: economyPrice,
             seatsAvailable: 24 + (dayOffset % 6),
@@ -138,17 +169,17 @@ async function seedFlights() {
             refundable: false,
           },
           {
-            flightId: flight.id,
+            flightId,
             cabin: "business",
             priceUsdCents: Math.round(economyPrice * (route.longHaul ? 3.4 : 2.6)),
             seatsAvailable: 6 + (dayOffset % 3),
             baggageAllowance: "2 carry-on, 2 checked bags (32kg)",
             refundable: true,
-          },
-        ];
+          }
+        );
         if (route.longHaul && dayOffset % 3 === 0) {
-          fares.push({
-            flightId: flight.id,
+          fareRows.push({
+            flightId,
             cabin: "first",
             priceUsdCents: Math.round(economyPrice * 5.2),
             seatsAvailable: 2,
@@ -156,12 +187,19 @@ async function seedFlights() {
             refundable: true,
           });
         }
-        await prisma.fareOption.createMany({ data: fares });
-        fareCount += fares.length;
       }
     }
   }
-  console.log(`Seeded ${flightCount} flights with ${fareCount} fare options across ${ROUTES.length} routes`);
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < flightRows.length; i += CHUNK_SIZE) {
+    await prisma.flight.createMany({ data: flightRows.slice(i, i + CHUNK_SIZE) });
+  }
+  for (let i = 0; i < fareRows.length; i += CHUNK_SIZE) {
+    await prisma.fareOption.createMany({ data: fareRows.slice(i, i + CHUNK_SIZE) });
+  }
+
+  console.log(`Seeded ${flightRows.length} flights with ${fareRows.length} fare options across ${ROUTES.length} routes`);
 }
 
 const HOTELS = [
