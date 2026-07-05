@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { stripe, isStripeConfigured } from "@/lib/stripe";
+import { getAppUrl } from "@/lib/url";
 import {
   applyPromoCode,
   confirmBookingPaid,
@@ -108,8 +109,8 @@ export async function startCheckoutAction(input: CheckoutInput): Promise<Checkou
           quantity: 1,
         },
       ],
-      success_url: `${process.env.APP_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.APP_URL}/checkout/cancel?bookingId=${booking.id}`,
+      success_url: `${getAppUrl()}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${getAppUrl()}/checkout/cancel?bookingId=${booking.id}`,
       metadata: { bookingId: booking.id },
     });
 

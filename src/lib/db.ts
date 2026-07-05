@@ -1,10 +1,19 @@
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
-// Swapping to Postgres/MySQL in production: replace this adapter with
-// @prisma/adapter-pg (or the mysql equivalent) pointed at DATABASE_URL, and
-// change the `provider` in prisma/schema.prisma. No other app code changes.
-const adapter = new PrismaLibSql({ url: process.env.DATABASE_URL ?? "file:./dev.db" });
+// Swapping to a different SQL database later: change `provider` in
+// prisma/schema.prisma and swap this adapter (e.g. @prisma/adapter-mysql2).
+// No other app code changes — everything else talks to `prisma`, never to
+// a concrete driver.
+//
+// `max: 1` keeps each serverless function instance's own connection count
+// low; use your database provider's pooled/PgBouncer connection string (on
+// Neon, the "Pooled connection" string) for DATABASE_URL so concurrent
+// invocations don't exhaust the database's connection limit.
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  max: process.env.NODE_ENV === "production" ? 1 : 5,
+});
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 

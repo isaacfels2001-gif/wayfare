@@ -2,8 +2,10 @@
 //
 // Portability note: this schema deliberately avoids Postgres-only features
 // (native enums, native arrays) so the same schema works unchanged against
-// SQLite (local dev default), PostgreSQL, or MySQL. To move to Postgres in
-// production, change `provider` below (or DATABASE_URL) — see README.
+// PostgreSQL, MySQL, or SQLite. Postgres is the standard datasource for both
+// local dev and production (see README "Database" section) — swapping to
+// MySQL later is a one-line `provider` change, same as this file already
+// demonstrates having moved from SQLite to Postgres.
 // Money is stored as integer minor units (cents) in USD to avoid float/decimal
 // portability issues; display currency conversion happens in the app layer
 // via the FxRate table.
@@ -14,7 +16,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // ---------- Identity ----------

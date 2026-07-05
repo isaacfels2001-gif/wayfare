@@ -2,20 +2,29 @@
 
 A full-stack OTA web app: search and book flights, hotels, and curated tour packages, combine them in a single cart/checkout, pay with Stripe (test mode), and manage everything from an admin dashboard. Built as a portfolio-quality demo — polished UI and a real end-to-end booking flow, backed by mock inventory instead of live GDS contracts.
 
-**Stack:** Next.js 16 (App Router, TypeScript) for both the frontend and the API layer (Route Handlers + Server Actions), Prisma ORM, Auth.js (NextAuth v5, credentials provider), Stripe Checkout (test mode), Tailwind CSS v4, Zustand, Recharts, pdf-lib. One codebase, one deploy target — see "Handoff notes" for the reasoning.
+**Stack:** Next.js 16 (App Router, TypeScript) for both the frontend and the API layer (Route Handlers + Server Actions), Prisma ORM on Postgres, Auth.js (NextAuth v5, credentials provider), Stripe Checkout (test mode), Tailwind CSS v4, Zustand, Recharts, pdf-lib. One codebase, one deploy target — see "Handoff notes" for the reasoning.
+
+---
+
+## Live demo
+
+<!-- Fill in after deploying — see "Deploying to Vercel" below. -->
+- **URL:** _not yet deployed_
+- **Customer login:** `customer@ota-demo.test` / `Traveler123!`
+- **Admin login:** `admin@ota-demo.test` / `Admin123!`
 
 ---
 
 ## Quick start
 
-Prerequisites: Node.js 20+ and npm.
+Prerequisites: Node.js 20+, npm, and a Postgres database (see "Database" below — Neon's free tier takes about a minute to set up and needs no credit card).
 
 ```bash
 git clone <this-repo>
 cd ota-platform
-cp .env.example .env        # fill in AUTH_SECRET at minimum, see below
+cp .env.example .env        # fill in DATABASE_URL and AUTH_SECRET, see below
 npm install                 # also runs `prisma generate` via postinstall
-npm run db:migrate           # creates the local SQLite database + tables
+npm run db:migrate           # applies the schema to your Postgres database
 npm run db:seed              # seeds flights, hotels, tours, promo codes, users
 npm run dev
 ```
@@ -54,9 +63,9 @@ All variables live in `.env` (see `.env.example` for the template — no secrets
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Prisma connection string. Defaults to a local SQLite file. |
+| `DATABASE_URL` | Postgres connection string (Neon "Pooled connection" recommended). Required. |
 | `AUTH_SECRET` | Session signing secret for Auth.js. Required. |
-| `APP_URL` | Base URL used for Stripe redirect URLs and email links. |
+| `APP_URL` | Base URL used for Stripe redirect URLs and email links. Falls back to Vercel's own `VERCEL_URL`, then `localhost:3000`, if unset. |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe **test-mode** keys. Optional — see "Payments." |
 | `FLIGHT_PROVIDER` / `HOTEL_PROVIDER` / `TOUR_PROVIDER` | Booking-adapter selection, currently `mock` only. |
 | `EMAIL_PROVIDER` / `EMAIL_FROM` | Transactional email adapter, currently `mock` only. |
@@ -112,7 +121,6 @@ Payments follow the same idea: `src/lib/stripe.ts` is the one place that constru
 - Payments — real Stripe Checkout code path exists, but falls back to instant mock confirmation without API keys.
 - Transactional email — logs to console + an `EmailLog` table instead of sending real mail.
 - FX rates — a static table (`FxRate` model), not a live rates feed.
-- Local database — SQLite by default (see below for why, and how to move to Postgres).
 
 **Production-style (the actual architecture, not a stand-in):**
 - Auth (bcrypt-hashed passwords, Auth.js JWT sessions, role-based admin gate re-checked in a data-access layer on every protected page/action — not just middleware).
@@ -125,30 +133,48 @@ Payments follow the same idea: `src/lib/stripe.ts` is the one place that constru
 
 ## Database
 
-Prisma schema: `prisma/schema.prisma`. It intentionally avoids Postgres-only features (no native enums, no native arrays — those become plain `String`/CSV columns with app-level typing) so the identical schema works unchanged on SQLite, PostgreSQL, or MySQL.
+Prisma schema: `prisma/schema.prisma`. It intentionally avoids Postgres-only features (no native enums, no native arrays — those become plain `String`/CSV columns with app-level typing) so the identical schema works unchanged on PostgreSQL, MySQL, or SQLite.
 
-**Local dev defaults to SQLite** (`DATABASE_URL="file:./dev.db"`, driven via `@prisma/adapter-libsql` so no native build tools are required on Windows/Mac/Linux). This was a pragmatic call for a zero-install "clone and run" experience — SQLite here is a real embedded relational database, not flat files, and the schema was written to be Postgres-safe from day one.
+**Postgres is the standard datasource, for both local dev and production**, via `@prisma/adapter-pg` (the standard `pg` driver — pure JS, no native build step, works the same locally and on serverless). One database works fine for both; Neon also supports free branching if you'd rather keep dev/prod data separate later.
 
-### Swapping the database (e.g. to Postgres for production)
+### Why Neon
 
-1. Get a Postgres instance (Docker, a managed free tier like Neon/Supabase, or local Postgres).
-2. In `prisma/schema.prisma`, change:
-   ```prisma
-   datasource db {
-     provider = "postgresql"
-   }
+Vercel's dashboard surfaces Neon and Supabase as first-class "Storage" integrations (Neon originally *was* the engine behind "Vercel Postgres" before that product was folded into the Marketplace). Neon was chosen here because:
+- It's Postgres-only and nothing more — this project just needs a connection string, not an accompanying auth/storage platform.
+- Free tier, no credit card required, provisions in under a minute.
+- A **pooled connection string** (PgBouncer-based) is offered out of the box, which is what serverless functions on Vercel need to avoid exhausting Postgres's connection limit.
+- It plugs into Vercel's dashboard directly (Storage tab), so the connection string can be added to your project without leaving Vercel.
+
+Supabase is an equally valid choice if you'd rather have a project that can later grow into auth/storage/realtime — swapping is just a different connection string, no code changes either way.
+
+### Setting up Neon (one-time, ~2 minutes)
+
+1. Go to **https://neon.tech** and sign up (GitHub login is the fastest option). Free tier, no credit card.
+2. Create a project (any name/region is fine — pick a region close to where you'll deploy on Vercel).
+3. On the project dashboard, find the **Connection string** panel. Switch it to **"Pooled connection"** (sometimes labeled "Pooler" — the hostname will contain `-pooler`).
+4. Copy the full string — it looks like:
    ```
-3. In `src/lib/db.ts`, swap the driver adapter:
-   ```ts
-   import { PrismaPg } from "@prisma/adapter-pg"; // npm install @prisma/adapter-pg
-   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+   postgresql://<user>:<password>@ep-xxxx-pooler.<region>.aws.neon.tech/<dbname>?sslmode=require
    ```
-4. Set `DATABASE_URL` to your Postgres connection string.
-5. `npm run db:migrate && npm run db:seed`.
+5. Paste it into `DATABASE_URL` in your `.env` (locally) and later into Vercel's environment variables (see "Deploying to Vercel").
 
-No application code outside those two files needs to change.
+### Applying the schema and seed data
 
-A `docker-compose.yml` is not included by default (this environment didn't have Docker available to test against), but any standard Postgres 16 container works with the steps above.
+```bash
+npm run db:migrate   # applies prisma/migrations/*/migration.sql to your Postgres database
+npm run db:seed       # inserts flights, hotels, tours, promo codes, FX rates, demo users
+```
+
+`db:migrate` runs `prisma migrate dev`, which will also prompt to create the database if it's empty. For a database that already has the schema applied (e.g. redeploying), use `npx prisma migrate deploy` instead, which doesn't need an interactive shadow-database step.
+
+### Swapping to a different Postgres provider, or to MySQL
+
+Nothing above is Neon-specific except the connection string itself — any Postgres works by just changing `DATABASE_URL`. To move to MySQL instead:
+1. In `prisma/schema.prisma`, change `provider = "mysql"`.
+2. In `src/lib/db.ts` and `prisma/seed.ts`, swap `@prisma/adapter-pg` for `@prisma/adapter-mariadb` (or the current MySQL driver adapter package).
+3. Delete `prisma/migrations/` and regenerate with `npx prisma migrate dev` against the new database.
+
+No application code outside those files needs to change.
 
 ---
 
@@ -199,6 +225,97 @@ src/
 - **Live GDS/payment contracts.** Requires signed business agreements this project doesn't have; the adapter pattern above is exactly the seam where that work plugs in.
 - **App store submission/deployment.**
 
-## Deploying
+## Deploying to Vercel
 
-Any Next.js-compatible host works (Vercel, Netlify, etc.). Set the environment variables above in your host's dashboard, point `DATABASE_URL` at a real Postgres instance (see "Swapping the database"), run migrations against it (`npx prisma migrate deploy`), and seed if you want demo data in the deployed environment.
+This app needs no special Vercel configuration — it's a stock Next.js App Router project (`vercel.json` is intentionally not included; Vercel auto-detects the framework, build command, and output). You need three things before you deploy: a GitHub repo with this code, a Neon database, and (optionally, for real Stripe test mode) Stripe test keys.
+
+### 1. Push this repo to GitHub
+
+If you haven't already:
+
+```bash
+git remote add origin https://github.com/<your-username>/<your-repo>.git
+git push -u origin main
+```
+
+(If you don't have a GitHub repo yet: go to **https://github.com/new**, name it, leave it empty/no README — since this repo already has one — then run the two commands above with the URL it gives you.)
+
+### 2. Get a Neon database
+
+Follow "Setting up Neon" above if you haven't yet. Keep the pooled `DATABASE_URL` handy — you'll paste it into Vercel in step 4.
+
+### 3. Create a Vercel account and import the project
+
+1. Go to **https://vercel.com/signup** and sign up — **"Continue with GitHub" is the fastest path**, since it also grants Vercel access to import your repos in the next step. No credit card is required for the free (Hobby) plan.
+2. Once logged in, click **"Add New..." → "Project"** (top right of the dashboard).
+3. Under "Import Git Repository," find your repo (search by name) and click **Import**. If it doesn't show up, click "Adjust GitHub App Permissions" and grant Vercel access to that repo.
+4. Vercel will auto-detect **Framework Preset: Next.js** and fill in the build command (`next build`) and output — leave these as-is.
+5. **Don't click Deploy yet** — open "Environment Variables" on the same screen and add the variables from the table in step 4 below.
+6. Once the env vars are in, click **Deploy**. First deploy takes 1–3 minutes.
+
+### 4. Environment variables to paste into Vercel
+
+In the Vercel project's **Settings → Environment Variables** (or the import screen in step 3), add each of these for the **Production** environment (and Preview, if you want preview deployments to also work):
+
+| Variable | Value | What it's for |
+|---|---|---|
+| `DATABASE_URL` | Your Neon pooled connection string | Postgres connection |
+| `AUTH_SECRET` | Output of `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | Signs Auth.js session cookies |
+| `APP_URL` | Your Vercel URL, e.g. `https://your-project.vercel.app` | Used to build Stripe redirect URLs and email links. You won't know the exact URL until after the first deploy — deploy once, then come back and set this, then redeploy (or rely on the automatic `VERCEL_URL` fallback and skip this entirely) |
+| `STRIPE_SECRET_KEY` | `sk_test_...` from your Stripe dashboard | Server-side Stripe API calls (see "Add Stripe test keys" below) |
+| `STRIPE_PUBLISHABLE_KEY` | `pk_test_...` from your Stripe dashboard | Client-side Stripe.js (reserved for future use; Checkout redirect doesn't require it today) |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_...` from your Stripe webhook endpoint | Verifies webhook requests are really from Stripe (see below) |
+| `FLIGHT_PROVIDER` | `mock` | Selects the mock flight adapter |
+| `HOTEL_PROVIDER` | `mock` | Selects the mock hotel adapter |
+| `TOUR_PROVIDER` | `mock` | Selects the mock tour adapter |
+| `EMAIL_PROVIDER` | `mock` | Selects the mock email adapter (logs instead of sending) |
+| `EMAIL_FROM` | `bookings@ota-demo.test` | Cosmetic "from" address in logged emails |
+
+Leave `STRIPE_*` blank if you just want the mock-payment fallback live — the app works fully either way (see "Payments").
+
+### 5. Run migrations + seed against the production database
+
+Vercel doesn't run `prisma migrate` or seed scripts automatically. Do it once from your local machine, pointed at the same Neon `DATABASE_URL` you gave Vercel:
+
+```bash
+# .env locally should have DATABASE_URL set to the same Neon connection string
+npx prisma migrate deploy
+npm run db:seed
+```
+
+(`migrate deploy` — not `migrate dev` — is the right command against a real deployed database; it applies existing migration files without prompting or needing a shadow database.)
+
+### 6. Add real Stripe test keys
+
+No code changes needed — this is entirely dashboard clicks:
+
+1. Go to **https://dashboard.stripe.com/register** and sign up (email + password, or "Continue with Google"). No business details or payment info are required to get test-mode keys.
+2. After signing up you land on the Stripe Dashboard, in **Test mode** by default (there's a "Test mode" toggle top-right — make sure it's on; it usually is for a new account).
+3. Go to **https://dashboard.stripe.com/test/apikeys** (or Developers → API keys in the left nav).
+4. Copy the **Publishable key** (`pk_test_...`) and click "Reveal test key" next to the **Secret key** (`sk_test_...`) to copy it too.
+5. Paste both into Vercel's environment variables (`STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`) and redeploy (Vercel → Deployments → "..." menu on the latest deployment → Redeploy), or just push a new commit.
+6. To get `STRIPE_WEBHOOK_SECRET`: in the Stripe Dashboard, go to **Developers → Webhooks → Add endpoint**. Endpoint URL: `https://your-project.vercel.app/api/webhooks/stripe`. Select the event `checkout.session.completed` (and optionally `checkout.session.expired`). Click "Add endpoint," then reveal and copy the **Signing secret** (`whsec_...`) into Vercel's `STRIPE_WEBHOOK_SECRET`, and redeploy.
+
+Without step 6, checkout still works (the success page has its own fallback that confirms the booking directly if the webhook hasn't fired) — the webhook is what makes confirmation instant rather than reliant on that fallback.
+
+### 7. Verify the live deployment
+
+Visit your `https://your-project.vercel.app` URL and click through:
+
+1. **Register** a new account (any email — nothing is actually emailed).
+2. **Search a flight**: origin JFK, destination LAX, any date within the next ~45 days.
+3. Click a fare (e.g. "Select economy") — confirm it says "Added to trip."
+4. **Search a hotel** in New York (or LA/London/Tokyo/Miami/Paris), open a hotel, click "Select room."
+5. Open **`/tours`**, open a package, pick a departure date, click "Add to trip."
+6. Go to **`/cart`** — all three items should be listed together. Optionally apply promo code `WELCOME10`.
+7. Click **"Proceed to checkout."** If Stripe keys are set, you're redirected to a real Stripe Checkout page — use the test card below. If not, you're taken straight to a confirmed booking (mock-payment fallback).
+8. On the Stripe Checkout page: card number **`4242 4242 4242 4242`**, any future expiry date (e.g. `12/34`), any 3-digit CVC, any name/ZIP. Click Pay.
+9. You should land on a **"Booking confirmed!"** page with an itemized receipt. Click **"Download voucher (PDF)"** — confirm a PDF downloads.
+10. Click **"View my trips"** — the booking should be listed under `/account`.
+11. Log out, log back in as **`admin@ota-demo.test`** / **`Admin123!`**, go to **`/admin`** — confirm the booking you just made shows up in the stats, revenue chart, and the Bookings list (`/admin/bookings`).
+
+If any step 500s, check Vercel's **Deployments → (latest) → Functions/Logs** tab for the error — the most common cause is a missing/incorrect `DATABASE_URL` or `AUTH_SECRET`.
+
+### A note on custom domains
+
+Not required for a portfolio demo — the default `your-project.vercel.app` URL is a real, permanent, shareable HTTPS URL. If you add a custom domain later (Vercel → Settings → Domains), update `APP_URL` to match and redeploy.
