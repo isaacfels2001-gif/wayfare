@@ -1,0 +1,275 @@
+// Prisma schema for the OTA demo platform.
+//
+// Portability note: this schema deliberately avoids Postgres-only features
+// (native enums, native arrays) so the same schema works unchanged against
+// SQLite (local dev default), PostgreSQL, or MySQL. To move to Postgres in
+// production, change `provider` below (or DATABASE_URL) — see README.
+// Money is stored as integer minor units (cents) in USD to avoid float/decimal
+// portability issues; display currency conversion happens in the app layer
+// via the FxRate table.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------- Identity ----------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("customer") // "customer" | "admin"
+  currency     String   @default("USD") // preferred display currency
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bookings  Booking[]
+  auditLogs AuditLog[]
+}
+
+// ---------- Flights ----------
+
+model Flight {
+  id              String   @id @default(cuid())
+  flightNumber    String
+  airline         String
+  airlineCode     String
+  originCode      String
+  originCity      String
+  destinationCode String
+  destinationCity String
+  departAt        DateTime
+  arriveAt        DateTime
+  durationMinutes Int
+  stops           Int      @default(0)
+  aircraft        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  fares FareOption[]
+
+  @@index([originCode, destinationCode, departAt])
+}
+
+model FareOption {
+  id                String @id @default(cuid())
+  flightId          String
+  cabin             String // "economy" | "premium_economy" | "business" | "first"
+  priceUsdCents     Int
+  seatsAvailable    Int
+  baggageAllowance  String
+  refundable        Boolean @default(false)
+
+  flight Flight @relation(fields: [flightId], references: [id], onDelete: Cascade)
+
+  @@index([flightId])
+}
+
+// ---------- Hotels ----------
+
+model Hotel {
+  id           String  @id @default(cuid())
+  name         String
+  description  String
+  city         String
+  country      String
+  address      String
+  starRating   Int
+  reviewScore  Float
+  reviewCount  Int
+  amenitiesCsv String // comma-separated amenity tags, kept portable across DBs
+  imagesCsv    String // comma-separated image URLs
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  rooms Room[]
+
+  @@index([city])
+}
+
+model Room {
+  id                String  @id @default(cuid())
+  hotelId           String
+  name              String
+  description       String
+  maxOccupancy      Int
+  bedType           String
+  pricePerNightCents Int
+  totalRooms        Int
+  amenitiesCsv      String
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+}
+
+// ---------- Tours ----------
+
+model TourPackage {
+  id             String  @id @default(cuid())
+  slug           String  @unique
+  title          String
+  summary        String
+  description    String
+  destination    String
+  durationDays   Int
+  basePriceCents Int
+  imagesCsv      String
+  itineraryJson  String // JSON string: [{ day, title, description }]
+  includedCsv    String
+  maxGroupSize   Int
+  difficulty     String // "easy" | "moderate" | "challenging"
+  published      Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  departures TourDeparture[]
+
+  @@index([destination])
+}
+
+model TourDeparture {
+  id             String @id @default(cuid())
+  tourId         String
+  date           DateTime
+  seatsAvailable Int
+
+  tour TourPackage @relation(fields: [tourId], references: [id], onDelete: Cascade)
+
+  @@index([tourId, date])
+}
+
+// ---------- Commerce ----------
+
+model PromoCode {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  description    String
+  discountType   String // "percent" | "fixed"
+  discountValue  Int // percent: 0-100, fixed: cents
+  minSpendCents  Int       @default(0)
+  appliesToCsv   String    @default("flight,hotel,tour")
+  maxUses        Int?
+  usedCount      Int       @default(0)
+  active         Boolean   @default(true)
+  validFrom      DateTime?
+  validTo        DateTime?
+  createdAt      DateTime  @default(now())
+
+  bookings Booking[]
+}
+
+model Booking {
+  id              String    @id @default(cuid())
+  bookingRef      String    @unique
+  userId          String
+  status          String    @default("pending") // pending | confirmed | cancelled | payment_failed
+  currency        String    @default("USD")
+  subtotalCents   Int
+  discountCents   Int       @default(0)
+  totalCents      Int
+  promoCodeId     String?
+  stripeSessionId String?   @unique
+  stripePaymentIntentId String?
+  createdAt       DateTime  @default(now())
+  confirmedAt     DateTime?
+
+  user      User        @relation(fields: [userId], references: [id])
+  promoCode PromoCode?  @relation(fields: [promoCodeId], references: [id])
+  items     BookingItem[]
+  payments  Payment[]
+  emailLogs EmailLog[]
+
+  @@index([userId])
+}
+
+model BookingItem {
+  id           String  @id @default(cuid())
+  bookingId    String
+  type         String // "flight" | "hotel" | "tour"
+  title        String
+  subtitle     String
+  startDate    DateTime
+  endDate      DateTime
+  quantity     Int
+  unitPriceCents Int
+  totalPriceCents Int
+  detailsJson  String // full snapshot of the item at time of booking
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+}
+
+model Payment {
+  id                    String   @id @default(cuid())
+  bookingId             String
+  provider              String   @default("stripe")
+  status                String // "succeeded" | "failed" | "pending"
+  amountCents           Int
+  currency              String
+  stripePaymentIntentId String?
+  rawEventJson          String?
+  createdAt             DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+}
+
+// ---------- Notifications (mock adapter, swappable for a real ESP) ----------
+
+model EmailLog {
+  id         String   @id @default(cuid())
+  bookingId  String?
+  to         String
+  subject    String
+  template   String
+  status     String // "sent" | "failed"
+  bodyPreview String
+  createdAt  DateTime @default(now())
+
+  booking Booking? @relation(fields: [bookingId], references: [id])
+}
+
+// ---------- CMS ----------
+
+model ContentPage {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  heroImage   String
+  bodyMarkdown String
+  published   Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- FX ----------
+
+model FxRate {
+  id        String   @id @default(cuid())
+  code      String   @unique // "USD" | "EUR" | "GBP" | "JPY"
+  name      String
+  symbol    String
+  rateToUsd Float // 1 USD = rateToUsd units of `code`
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Admin audit ----------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
