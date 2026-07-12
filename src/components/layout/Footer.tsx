@@ -36,6 +36,7 @@ export function Footer() {
               <li>Secure checkout (Stripe test mode)</li>
               <li>Free cancellation on select rates</li>
               <li>24/7 support (demo)</li>
+              <li><Link href="/privacy" className="hover:text-slate-900">Privacy Policy</Link></li>
             </ul>
           </div>
         </div>
